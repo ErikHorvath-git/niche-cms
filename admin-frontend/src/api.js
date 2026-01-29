@@ -12,6 +12,18 @@ const apiClient = axios.create({
   }
 });
 
+const redirectToLogin = () => {
+  import('./router')
+    .then((module) => {
+      module.default.push({ name: 'Login' });
+    })
+    .catch(() => {
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
+    });
+};
+
 apiClient.interceptors.request.use((config) => {
   const authToken = token.value;
   if (authToken) {
@@ -26,9 +38,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if ([401, 403].includes(error?.response?.status)) {
       logout();
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      }
+      redirectToLogin();
     }
     return Promise.reject(error);
   }

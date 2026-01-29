@@ -44,6 +44,7 @@ function logout() {
   if (!isBrowser) return;
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
+  window.location.href = '/login';
 }
 
 const isAuthenticated = computed(() => Boolean(token.value));

@@ -3,7 +3,7 @@ import LoginView from '../views/LoginView.vue';
 import RegisterView from '../views/RegisterView.vue';
 import DashboardView from '../views/DashboardView.vue';
 import VerifyEmailView from '../views/VerifyEmail.vue';
-import { token } from '../store/auth';
+import { token, TOKEN_KEY } from '../store/auth';
 
 const routes = [
   {
@@ -31,6 +31,10 @@ const routes = [
     meta: { requiresGuest: true }
   },
   {
+    path: '/',
+    redirect: () => (token.value ? '/dashboard' : '/login')
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: () => (token.value ? '/dashboard' : '/login')
   }
@@ -42,7 +46,11 @@ const router = createRouter({
 });
 
 router.beforeEach((to, from, next) => {
-  const isAuthenticated = Boolean(token.value);
+  const browserToken =
+    typeof window !== 'undefined'
+      ? window.localStorage.getItem(TOKEN_KEY)
+      : null;
+  const isAuthenticated = Boolean(token.value || browserToken);
 
   if (to.meta.requiresAuth && !isAuthenticated) {
     return next({ name: 'Login' });
