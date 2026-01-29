@@ -35,4 +35,16 @@ app.post('/api/obsah', async (req, res) => {
   res.status(201).json(data);
 });
 
+// Endpoint na mazanie položky podľa ID
+app.delete('/api/obsah/:id', async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase
+    .from('diamond_obsah')
+    .delete()
+    .eq('id', id);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ message: 'Zmazané' });
+});
+
 module.exports = app;
