@@ -52,6 +52,8 @@ app.use(
   })
 );
 
+app.use(express.static('public'));
+
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 const requireAuth = createAuthMiddleware(supabaseAdmin);
@@ -59,6 +61,7 @@ const requireAuth = createAuthMiddleware(supabaseAdmin);
 const contentTable = 'client_content';
 const clientsTable = 'clients';
 const userProfilesTable = 'user_profiles';
+const siteStructureTable = 'site_structure';
 
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -276,7 +279,8 @@ app.post('/api/obsah/:clientId', requireAuth, async (req, res) => {
 
   const payload = {
     ...req.body,
-    client_id: resolvedClientId
+    client_id: resolvedClientId,
+    image_url: req.body.image_url || null
   };
 
   const { data, error } = await supabaseAdmin
@@ -315,6 +319,148 @@ app.delete('/api/obsah/:clientId/:id', requireAuth, async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
   res.json({ message: 'Deleted' });
+});
+
+app.post('/api/sync-schema', async (req, res) => {
+  const { clientId, elements } = req.body;
+
+  if (!clientId || !Array.isArray(elements)) {
+    return res
+      .status(400)
+      .json({ error: 'clientId and elements array are required.' });
+  }
+
+  let resolvedClientId;
+  try {
+    resolvedClientId = await resolveClientUuid(clientId);
+  } catch (error) {
+    console.error('Client lookup failed for schema sync', error);
+    return res.status(500).json({ error: 'Unable to resolve client identifier.' });
+  }
+
+  if (!resolvedClientId) {
+    return res.status(404).json({ error: 'Client not found.' });
+  }
+
+  const sanitizedElements = elements
+    .map((element) => ({
+      elementId: (element.elementId || element.element_id || '').trim(),
+      currentText: element.currentText || element.current_text || '',
+      tagName: element.tagName || element.tag_name || ''
+    }))
+    .filter((element) => element.elementId);
+
+  if (sanitizedElements.length > 0) {
+    const { data: existing, error: existingError } = await supabaseAdmin
+      .from(siteStructureTable)
+      .select('element_id')
+      .eq('client_id', resolvedClientId);
+
+    if (existingError) {
+      console.error('Unable to read existing site elements', existingError);
+      return res.status(500).json({ error: 'Unable to read site structure.' });
+    }
+
+    const existingIds = new Set(existing.map((row) => row.element_id));
+
+    const toInsert = sanitizedElements
+      .filter((element) => !existingIds.has(element.elementId))
+      .map((element) => ({
+        client_id: resolvedClientId,
+        element_id: element.elementId,
+        tag_name: element.tagName,
+        default_value: element.currentText,
+        current_value: element.currentText
+      }));
+
+    if (toInsert.length > 0) {
+      const { error: insertError } = await supabaseAdmin
+        .from(siteStructureTable)
+        .insert(toInsert);
+
+      if (insertError) {
+        console.error('Unable to insert site structure rows', insertError);
+        return res.status(500).json({ error: 'Unable to sync site structure.' });
+      }
+    }
+  }
+
+  const { data: savedData, error: savedError } = await supabaseAdmin
+    .from(siteStructureTable)
+    .select('element_id, tag_name, current_value, default_value')
+    .eq('client_id', resolvedClientId);
+
+  if (savedError) {
+    console.error('Unable to load site structure', savedError);
+    return res.status(500).json({ error: 'Unable to load site structure.' });
+  }
+
+  res.json({ elements: savedData });
+});
+
+app.get('/api/site-structure/:clientId', async (req, res) => {
+  const { clientId } = req.params;
+
+  let resolvedClientId;
+  try {
+    resolvedClientId = await resolveClientUuid(clientId);
+  } catch (error) {
+    console.error('Client lookup failed for site structure fetch', error);
+    return res.status(500).json({ error: 'Unable to resolve client identifier.' });
+  }
+
+  if (!resolvedClientId) {
+    return res.status(404).json({ error: 'Client not found.' });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from(siteStructureTable)
+    .select('element_id, tag_name, current_value, default_value')
+    .eq('client_id', resolvedClientId);
+
+  if (error) {
+    console.error('Unable to load site structure', error);
+    return res.status(500).json({ error: 'Unable to load site structure.' });
+  }
+
+  res.json({ elements: data });
+});
+
+app.post('/api/site-structure', async (req, res) => {
+  const { clientId, elementId, currentValue } = req.body;
+
+  if (!clientId || !elementId) {
+    return res.status(400).json({ error: 'clientId and elementId are required.' });
+  }
+
+  let resolvedClientId;
+  try {
+    resolvedClientId = await resolveClientUuid(clientId);
+  } catch (error) {
+    console.error('Client lookup failed for element update', error);
+    return res.status(500).json({ error: 'Unable to resolve client identifier.' });
+  }
+
+  if (!resolvedClientId) {
+    return res.status(404).json({ error: 'Client not found.' });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from(siteStructureTable)
+    .update({
+      current_value: currentValue
+    })
+    .eq('client_id', resolvedClientId)
+    .eq('element_id', elementId)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    console.error('Unable to update site element', error);
+    return res.status(500).json({ error: 'Unable to update site element.' });
+  }
+
+  res.json({ element: data });
 });
 
 if (process.env.NODE_ENV !== 'production') {
