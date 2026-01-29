@@ -1,10 +1,21 @@
-(async function() {
-    const container = document.getElementById('diamond-widget');
-    if (!container) return;
+;(async function () {
+    const scriptTag = document.currentScript;
+    const targetId =
+        scriptTag?.getAttribute('data-target') || 'saas-widget';
+    const container = document.getElementById(targetId);
+    if (!container) {
+        console.warn('[SaaS widget] Target container not found:', targetId);
+        return;
+    }
 
-    const clientId = container.getAttribute('data-client');
+    const clientId =
+        container.getAttribute('data-client') ||
+        scriptTag?.getAttribute('data-client') ||
+        'saas-default-client';
+    const backendUrl =
+        (scriptTag?.getAttribute('data-backend-url') || '/api').replace(/\/+$/, '');
     
-    // Pridáme Diamond Gym štýl (tmavý, zlaté prvky)
+    // Pridáme widget štýl (tmavý, zlaté prvky)
     const style = document.createElement('style');
     style.textContent = `
         .dg-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; font-family: sans-serif; }
@@ -16,7 +27,7 @@
     document.head.appendChild(style);
 
     try {
-        const res = await fetch(`/api/obsah/${clientId}`);
+        const res = await fetch(`${backendUrl}/obsah/${clientId}`);
         const data = await res.json();
 
         container.innerHTML = `
@@ -31,6 +42,6 @@
             </div>
         `;
     } catch (e) {
-        console.error("Chyba Diamond Widgetu:", e);
+        console.error("SaaS widget error:", e);
     }
 })();

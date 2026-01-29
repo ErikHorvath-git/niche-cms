@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./backend/.env
+    networks:
+      - moja_network
+
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    env_file:
+      - ./admin-frontend/.env
+    networks:
+      - moja_network
+
+networks:
+  moja_network:
+    driver: bridge

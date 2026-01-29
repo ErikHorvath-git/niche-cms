@@ -1,6 +1,6 @@
 <template>
   <div id="admin-panel">
-    <h1>💎 Diamond Gym Admin</h1>
+    <h1>💎 SaaS Platform Admin</h1>
     
     <div class="card form">
       <h3>Pridať novú položku</h3>
@@ -30,30 +30,84 @@
 import { ref, onMounted } from 'vue';
 import axios from 'axios';
 
+const parseClientId = () => {
+  const searchParams =
+    typeof window === 'undefined'
+      ? new URLSearchParams()
+      : new URLSearchParams(window.location.search);
+  return (
+    searchParams.get('clientId') ||
+    import.meta.env.VITE_SAAS_CLIENT_ID ||
+    import.meta.env.VITE_CLIENT_ID ||
+    import.meta.env.VITE_APP_CLIENT_ID ||
+    'saas-default-client'
+  );
+};
+
+const backendBase =
+  (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000/api').replace(/\/+$/, '');
+const clientId = parseClientId();
+const clientEndpoint = `${backendBase}/obsah/${clientId}`;
+
 const items = ref([]);
 const loading = ref(false);
 const status = ref('');
-const newItem = ref({ client_id: 'diamond_gym', typ: 'cennik', titulok: '', podtitulok: '', cena: '' });
+const newItem = ref({
+  client_id: clientId,
+  typ: 'cennik',
+  titulok: '',
+  podtitulok: '',
+  cena: ''
+});
 
-// Načítanie dát pri štarte
 const fetchItems = async () => {
-  const res = await axios.get('http://localhost:3000/api/obsah/diamond_gym');
-  items.value = res.data;
+  loading.value = true;
+  status.value = '';
+  try {
+    const res = await axios.get(clientEndpoint);
+    items.value = res.data;
+  } catch (error) {
+    status.value =
+      error.response?.data?.error || error.message || 'Chyba pri načítaní dát';
+  } finally {
+    loading.value = false;
+  }
 };
 
 const saveData = async () => {
   if (!newItem.value.titulok) return;
-  loading.ref = true;
-  await axios.post('http://localhost:3000/api/obsah', newItem.value);
-  await fetchItems(); // Obnoviť zoznam
-  newItem.value.titulok = ''; newItem.value.podtitulok = ''; newItem.value.cena = '';
-  loading.ref = false;
+  loading.value = true;
+  status.value = '';
+  try {
+    await axios.post(clientEndpoint, {
+      ...newItem.value,
+      client_id: clientId
+    });
+    newItem.value.titulok = '';
+    newItem.value.podtitulok = '';
+    newItem.value.cena = '';
+    newItem.value.client_id = clientId;
+    await fetchItems();
+  } catch (error) {
+    status.value =
+      error.response?.data?.error || error.message || 'Chyba pri ukladaní';
+  } finally {
+    loading.value = false;
+  }
 };
 
 const deleteItem = async (id) => {
-  if (confirm('Naozaj zmazať?')) {
-    await axios.delete(`http://localhost:3000/api/obsah/${id}`);
+  if (!confirm('Naozaj zmazať?')) return;
+  loading.value = true;
+  status.value = '';
+  try {
+    await axios.delete(`${clientEndpoint}/${id}`);
     await fetchItems();
+  } catch (error) {
+    status.value =
+      error.response?.data?.error || error.message || 'Chyba pri mazaní';
+  } finally {
+    loading.value = false;
   }
 };
 
