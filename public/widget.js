@@ -18,6 +18,8 @@
   let scanTimer = null;
   let isScanning = false;
   let suppressMutationObserver = false;
+  let isUpdatingFromDB = false;
+  let lastSyncHash = '';
   let mapperHost = null;
   let mapperClientId = '';
   let observer = null;
@@ -176,6 +178,36 @@
   const normalizePayloadValue = (value) =>
     value === undefined || value === null ? '' : value.toString();
 
+  const normalizeForHash = (value) => normalizePayloadValue(value).trim();
+
+  const computeElementsHash = (elements = []) => {
+    if (!Array.isArray(elements) || elements.length === 0) {
+      return '';
+    }
+    const normalized = elements
+      .map((entry) => {
+        const id = entry.element_id || entry.elementId;
+        if (!id) {
+          return null;
+        }
+        const value =
+          entry.current_value ??
+          entry.currentValue ??
+          entry.value ??
+          entry.default_value ??
+          '';
+        return { id, value: normalizeForHash(value) };
+      })
+      .filter(Boolean);
+    if (normalized.length === 0) {
+      return '';
+    }
+    const pairs = normalized
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map(({ id, value }) => `${id}:${value}`);
+    return pairs.join('|');
+  };
+
   const buildDomBreadcrumb = (element) => {
     const segments = [];
     let current = element;
@@ -210,10 +242,15 @@
     return candidate;
   };
 
-  const getElementValue = (element) =>
-    element.tagName.toLowerCase() === 'img'
-      ? element.getAttribute('src') || ''
-      : element.innerHTML || '';
+  const getElementValue = (element) => {
+    if (!element) {
+      return '';
+    }
+    if (element.tagName.toLowerCase() === 'img') {
+      return (element.getAttribute('src') || '').trim();
+    }
+    return (element.innerHTML || '').trim();
+  };
 
   const applyValueToElement = (element, value) => {
     if (value === undefined || value === null) {
@@ -251,18 +288,19 @@
           cache && Object.prototype.hasOwnProperty.call(cache, elementId)
             ? cache[elementId]
             : null;
-        const originalValue =
+        const originalSource =
           cacheEntry && Object.prototype.hasOwnProperty.call(cacheEntry, 'originalValue')
-            ? normalizePayloadValue(cacheEntry.originalValue)
-            : normalizePayloadValue(rawValue);
+            ? cacheEntry.originalValue
+            : rawValue;
+        const originalValue = normalizePayloadValue(originalSource).trim();
         const hasCustomValue =
           cacheEntry && Object.prototype.hasOwnProperty.call(cacheEntry, 'value');
         if (hasCustomValue) {
           applyValueToElement(element, cacheEntry.value);
         }
         const currentValue = hasCustomValue
-          ? normalizePayloadValue(cacheEntry.value)
-          : normalizePayloadValue(getElementValue(element));
+          ? normalizePayloadValue(cacheEntry.value).trim()
+          : normalizePayloadValue(getElementValue(element)).trim();
         results.push({
           elementId,
           tagName,
@@ -273,6 +311,56 @@
       });
     });
     return results;
+  };
+
+  const updateElementsFromServer = (elements = []) => {
+    if (!Array.isArray(elements) || elements.length === 0 || !observer) {
+      return;
+    }
+
+    const previousSuppression = suppressMutationObserver;
+    const previousUpdatingFlag = isUpdatingFromDB;
+    suppressMutationObserver = true;
+    isUpdatingFromDB = true;
+
+    observer.disconnect();
+
+    try {
+      elements.forEach((entry) => {
+        const entryId = entry.element_id || entry.elementId;
+        if (!entryId) {
+          return;
+        }
+        const hostElement = document.querySelector(`[data-saas-id="${entryId}"]`);
+        if (!hostElement) {
+          return;
+        }
+        const dbValue = normalizePayloadValue(
+          entry.current_value ?? entry.currentValue ?? entry.value
+        )
+          .trim();
+        const domValue = normalizePayloadValue(getElementValue(hostElement)).trim();
+
+        if (hostElement.dataset) {
+          hostElement.dataset.originalValue = dbValue;
+        }
+
+        if (domValue !== dbValue) {
+          applyValueToElement(hostElement, dbValue);
+        }
+      });
+    } finally {
+      setTimeout(() => {
+        suppressMutationObserver = previousSuppression;
+        isUpdatingFromDB = previousUpdatingFlag;
+        if (observer) {
+          observer.observe(document.body, mutationConfig);
+        }
+      }, 400);
+    }
+
+    const hashAfterUpdate = computeElementsHash(elements);
+    lastSyncHash = hashAfterUpdate;
   };
 
   const injectStyles = (root) => {
@@ -408,9 +496,7 @@
 
     const response = await fetch(syncEndpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
@@ -419,37 +505,10 @@
     }
 
     const data = await response.json();
-    const savedElements = data.elements || [];
-    const localCache = loadLocalCache();
+    const savedElements = Array.isArray(data.elements) ? data.elements : [];
 
-    withSuppressedMutations(() => {
-      savedElements.forEach((entry) => {
-        if (!entry.element_id) {
-          return;
-        }
-        const hasLocalValue =
-          localCache &&
-          Object.prototype.hasOwnProperty.call(localCache, entry.element_id) &&
-          Object.prototype.hasOwnProperty.call(localCache[entry.element_id], 'value');
-        if (hasLocalValue) {
-          return;
-        }
-        const hostElement = document.querySelector(`[data-saas-id="${entry.element_id}"]`);
-        if (!hostElement) {
-          return;
-        }
-        const currentValue = entry.current_value;
-        if (typeof currentValue !== 'string') {
-          return;
-        }
-        if (entry.tag_name && entry.tag_name.toLowerCase() === 'img') {
-          hostElement.src = currentValue;
-        } else {
-          hostElement.innerHTML = currentValue;
-        }
-      });
-    });
-
+    // Tieto riadky vykonajú tie opravy, ktoré sme napísali hore
+    updateElementsFromServer(savedElements);
     persistLocalCache(savedElements);
 
     return savedElements;
@@ -460,9 +519,19 @@
       return;
     }
     const elements = collectSiteElements(mapperHost);
+    const currentHash = computeElementsHash(elements);
+    if (currentHash && currentHash === lastSyncHash) {
+      return;
+    }
     isScanning = true;
     try {
-      await syncSiteStructure(mapperClientId, elements);
+      const savedElements = await syncSiteStructure(mapperClientId, elements);
+      const serverHash = computeElementsHash(savedElements);
+      if (serverHash) {
+        lastSyncHash = serverHash;
+      } else if (currentHash) {
+        lastSyncHash = currentHash;
+      }
     } catch (error) {
       console.error('Auto mapper sync failed', error);
     } finally {
@@ -494,7 +563,7 @@
     mapperHost = host;
     mapperClientId = clientId;
     observer = new MutationObserver(() => {
-      if (suppressMutationObserver) {
+      if (suppressMutationObserver || isUpdatingFromDB) {
         return;
       }
       scheduleScan();

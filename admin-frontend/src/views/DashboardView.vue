@@ -94,6 +94,7 @@
                 <textarea
                   v-model="element.current_value"
                   @input="element.dirty = true"
+                  @blur="saveElement(element)"
                   rows="2"
                   class="w-full text-sm text-white bg-[#121212] border border-gray-800 rounded-md px-2 py-1 focus:outline-none focus:border-yellow-400"
                   placeholder="Text, ktorý sa sa zobrazí na stránke"
@@ -103,7 +104,7 @@
                 <button
                   class="px-3 py-1 text-sm font-semibold text-black bg-yellow-400 rounded-full disabled:bg-gray-600"
                   :disabled="element.saving || !element.element_id"
-                  @click="saveSiteElement(element)"
+                  @click="saveElement(element)"
                 >
                   {{ element.saving ? 'Ukladám…' : 'Uložiť' }}
                 </button>
@@ -295,15 +296,19 @@ const stopSiteElementsPolling = () => {
   siteElementsPoll = null;
 };
 
-const saveSiteElement = async (element) => {
-  if (!element.element_id) return;
+const saveElement = async (element) => {
+  if (!element?.element_id || element.saving) {
+    return;
+  }
   element.saving = true;
+  status.value = '';
   try {
-    await apiClient.post('/site-structure', {
+    const payload = {
       clientId: clientSlug.value,
-      elementId: element.element_id,
-      currentValue: element.current_value
-    });
+      currentValue: normalizeElementText(element.current_value),
+      lastEditedByAdmin: true
+    };
+    await apiClient.put(`/site-elements/${encodeURIComponent(element.element_id)}`, payload);
     element.dirty = false;
   } catch (err) {
     status.value =

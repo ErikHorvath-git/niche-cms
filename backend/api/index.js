@@ -159,7 +159,6 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Sync Site Structure (Fixnutý Upsert)
 app.post('/api/site-elements/sync', async (req, res) => {
   try {
     const { clientId, elements } = req.body;
@@ -181,11 +180,22 @@ app.post('/api/site-elements/sync', async (req, res) => {
     console.log(`[SiteElements] Syncing ${elementsToUpsert.length} elements for client ${resolvedClientId}`);
 
     if (elementsToUpsert.length > 0) {
-      const { error: upsertError } = await supabaseAdmin
+      const elementIds = elementsToUpsert.map((entry) => entry.element_id);
+      const { data: existingElements, error: fetchError } = await supabaseAdmin
         .from(siteStructureTable)
-        .upsert(elementsToUpsert, { onConflict: 'client_id,element_id' });
+        .select('element_id')
+        .eq('client_id', resolvedClientId)
+        .in('element_id', elementIds);
+      if (fetchError) throw fetchError;
 
-      if (upsertError) throw upsertError;
+      const existingIds = new Set((existingElements || []).map((row) => row.element_id));
+      const newElements = elementsToUpsert.filter((entry) => !existingIds.has(entry.element_id));
+      if (newElements.length > 0) {
+        const { error: insertError } = await supabaseAdmin
+          .from(siteStructureTable)
+          .insert(newElements);
+        if (insertError) throw insertError;
+      }
     }
 
     const { data: savedData } = await supabaseAdmin.from(siteStructureTable).select('*').eq('client_id', resolvedClientId);
@@ -221,6 +231,44 @@ app.post('/api/site-structure', async (req, res) => {
       .maybeSingle();
     
     if (error) throw error;
+    res.json({ element: data });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/site-elements/:elementId', async (req, res) => {
+  try {
+    const { elementId } = req.params;
+    const { clientId, currentValue } = req.body;
+    if (!elementId || !clientId) {
+      return res.status(400).json({ error: 'Element ID and clientId are required.' });
+    }
+
+    const resolvedClientId = await resolveClientUuid(clientId);
+    if (!resolvedClientId) {
+      return res.status(404).json({ error: 'Client not found.' });
+    }
+
+    const normalizedValue = normalizePayloadValue(currentValue);
+    const markEdited = req.body.lastEditedByAdmin !== undefined ? !!req.body.lastEditedByAdmin : true;
+
+    const { data, error } = await supabaseAdmin
+      .from(siteStructureTable)
+      .update({
+        current_value: normalizedValue,
+        last_edited_by_admin: markEdited
+      })
+      .eq('client_id', resolvedClientId)
+      .eq('element_id', elementId)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: 'Element not found.' });
+    }
+
     res.json({ element: data });
   } catch (error) {
     res.status(500).json({ error: error.message });
