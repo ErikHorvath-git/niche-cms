@@ -7,6 +7,10 @@
   "scripts": {
     "start:backend": "npm --workspace backend start",
     "dev:admin": "npm --workspace admin-frontend dev",
-    "build:admin": "npm --workspace admin-frontend build"
+    "build:admin": "npm --workspace admin-frontend build",
+    "build:widget": "esbuild public/widget.js --bundle --minify --sourcemap=external --platform=browser --target=es2020 --outfile=public/dist/widget.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.3"
   }
 }

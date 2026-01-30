@@ -1,11 +1,13 @@
-version: "3.9"
-
 services:
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "3000:3000"
+    environment:
+      # Pridávame port 8080 do povolených zdrojov kvôli testovaniu
+      - ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8080
     env_file:
       - ./backend/.env
     networks:
@@ -20,6 +22,18 @@ services:
       - "5173:5173"
     env_file:
       - ./admin-frontend/.env
+    networks:
+      - moja_network
+
+  # TÁTO SLUŽBA SIMULUJE ZÁKAZNÍCKY WEB
+  test-site:
+    image: halverneus/static-file-server:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./testfolder:/web
+    environment:
+      - PORT=8080
     networks:
       - moja_network
 

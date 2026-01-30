@@ -20,8 +20,8 @@ export async function uploadImage(file, clientId) {
     throw new Error('clientId and file are required to upload image');
   }
 
-const fileName = `${Date.now()}_${file.name}`;
-const filePath = `${clientId}/${fileName}`;
+  const safeFile = encodeURIComponent(`${Date.now()}_${file.name}`);
+  const filePath = `${clientId}/${safeFile}`;
 
   const { error: uploadError } = await supabase.storage
     .from(bucket)
@@ -35,8 +35,13 @@ const filePath = `${clientId}/${fileName}`;
   }
 
   const {
-    data: { publicUrl }
+    data: { publicUrl },
+    error: urlError
   } = supabase.storage.from(bucket).getPublicUrl(filePath);
+
+  if (urlError) {
+    throw urlError;
+  }
 
   return publicUrl;
 }

@@ -40,34 +40,85 @@
     <WidgetGenerator :items="items" />
 
     <section class="card site-elements">
-      <h3>Zachytené prvky stránky</h3>
-      <div v-if="siteElements.length">
-        <div
-          v-for="element in siteElements"
-          :key="element.element_id"
-          class="site-element"
+      <div class="flex items-center justify-between gap-2">
+        <h3 class="m-0">Zachytené prvky stránky</h3>
+        <span
+          class="px-2 py-0.5 text-xs font-semibold rounded-full bg-yellow-500 text-black"
+          >Automatické cesty</span
         >
-          <div class="site-element__meta">
-            <strong>{{ element.element_id }}</strong>
-            <span>{{ element.tag_name }}</span>
-          </div>
-          <input
-            v-model="element.current_value"
-            @input="element.dirty = true"
-            placeholder="Text, ktorý sa zobrazí na stránke"
-          />
-          <button
-            class="site-element__save"
-            :disabled="element.saving"
-            @click="saveSiteElement(element)"
-          >
-            {{ element.saving ? 'Ukladám...' : 'Uložiť' }}
-          </button>
-        </div>
       </div>
-      <p v-else class="empty-notice">
-        Widget doposiaľ neidentifikoval žiadne elementy s atributom
-        <code>data-saas-id</code>.
+      <div v-if="siteElements.length" class="overflow-x-auto mt-4">
+        <table class="min-w-full text-left table-auto border-separate border-spacing-y-2">
+          <thead>
+            <tr class="text-xs uppercase text-gray-400">
+              <th class="px-3 py-2 font-semibold">Element ID</th>
+              <th class="px-3 py-2 font-semibold">Tag</th>
+              <th class="px-3 py-2 font-semibold">Pôvodný text</th>
+              <th class="px-3 py-2 font-semibold">Aktuálna hodnota</th>
+              <th class="px-3 py-2 font-semibold">Akcie</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="element in siteElements"
+              :key="element.element_id"
+              :class="{
+                'border-l-4 border-yellow-400 bg-white/5': element.current_value !== element.original_value
+              }"
+              class="bg-[#0f0f0f] border border-gray-800 rounded-lg"
+            >
+              <td class="px-3 py-3 align-top">
+                <p class="text-sm font-mono text-gray-100 break-words">
+                  {{ element.element_id }}
+                </p>
+                <p
+                  v-if="element.current_value !== element.original_value"
+                  class="text-xxs text-yellow-400 mt-1"
+                >
+                  Zmenené
+                </p>
+              </td>
+              <td class="px-3 py-3 align-top">
+                <span
+                  class="inline-flex items-center px-2 py-0.5 text-xs font-semibold tracking-wide text-gray-900 bg-gray-200 rounded-full"
+                >
+                  {{ element.tag_name || '—' }}
+                </span>
+              </td>
+              <td class="px-3 py-3 align-top">
+                <p class="text-sm text-gray-300 whitespace-pre-line">
+                  {{ element.original_value || 'žiadna hodnota' }}
+                </p>
+              </td>
+              <td class="px-3 py-3 align-top">
+                <textarea
+                  v-model="element.current_value"
+                  @input="element.dirty = true"
+                  @blur="saveElement(element)"
+                  rows="2"
+                  class="w-full text-sm text-white bg-[#121212] border border-gray-800 rounded-md px-2 py-1 focus:outline-none focus:border-yellow-400"
+                  placeholder="Text, ktorý sa sa zobrazí na stránke"
+                ></textarea>
+              </td>
+              <td class="px-3 py-3 align-top flex flex-col gap-2">
+                <button
+                  class="px-3 py-1 text-sm font-semibold text-black bg-yellow-400 rounded-full disabled:bg-gray-600"
+                  :disabled="element.saving || !element.element_id"
+                  @click="saveElement(element)"
+                >
+                  {{ element.saving ? 'Ukladám…' : 'Uložiť' }}
+                </button>
+                <span class="text-xxs text-gray-500">
+                  {{ element.tag_name?.toUpperCase() || '—' }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else class="mt-4 text-sm text-gray-400">
+        Widget ešte nenaskenoval žiadne prvky. Otvorte vašu stránku s nasadeným
+        widgetom.
       </p>
     </section>
 
@@ -76,7 +127,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import apiClient from '../api';
 import { logout, user } from '../store/auth';
@@ -98,7 +149,15 @@ const parseClientId = () => {
   );
 };
 
-const clientSlug = computed(() => user.value?.slug || parseClientId());
+const sanitizeClientParam = (value) =>
+  (value || '')
+    .toString()
+    .split(':')[0]
+    .trim();
+
+const clientSlug = computed(
+  () => sanitizeClientParam(user.value?.slug) || sanitizeClientParam(parseClientId())
+);
 const clientEndpoint = computed(() => `/obsah/${clientSlug.value}`);
 const siteEndpoint = computed(() => `/site-structure/${clientSlug.value}`);
 
@@ -191,28 +250,65 @@ const deleteItem = async (id) => {
   }
 };
 
+const normalizeElementText = (value) =>
+  value === undefined || value === null ? '' : value.toString();
+
 const fetchSiteElements = async () => {
   try {
+    status.value = '';
     const res = await apiClient.get(siteEndpoint.value);
     siteElements.value = (res.data?.elements || []).map((element) => ({
       ...element,
+      current_value: normalizeElementText(element.current_value),
+      original_value:
+        normalizeElementText(element.original_value) ||
+        normalizeElementText(element.default_value),
       dirty: false,
       saving: false
     }));
   } catch (err) {
+    const networkError =
+      err?.code === 'ERR_NETWORK' || /network error/i.test(err?.message || '');
+    status.value = networkError
+      ? 'Sieťová chyba: backend môže ešte reštartovať, skúste načítať o chvíľu.'
+      : err.response?.data?.error || err.message || 'Chyba pri načítaní prvkov';
     console.error('Unable to load site elements', err);
+    siteElements.value = [];
   }
 };
 
-const saveSiteElement = async (element) => {
-  if (!element.element_id) return;
-  element.saving = true;
-  try {
-    await apiClient.post('/site-structure', {
-      clientId: clientSlug.value,
-      elementId: element.element_id,
-      currentValue: element.current_value
+let siteElementsPoll = null;
+const startSiteElementsPolling = () => {
+  if (siteElementsPoll) {
+    return;
+  }
+  siteElementsPoll = setInterval(() => {
+    fetchSiteElements().catch((err) => {
+      console.error('Auto-refresh failed', err);
     });
+  }, 15000);
+};
+const stopSiteElementsPolling = () => {
+  if (!siteElementsPoll) {
+    return;
+  }
+  clearInterval(siteElementsPoll);
+  siteElementsPoll = null;
+};
+
+const saveElement = async (element) => {
+  if (!element?.element_id || element.saving) {
+    return;
+  }
+  element.saving = true;
+  status.value = '';
+  try {
+    const payload = {
+      clientId: clientSlug.value,
+      currentValue: normalizeElementText(element.current_value),
+      lastEditedByAdmin: true
+    };
+    await apiClient.put(`/site-elements/${encodeURIComponent(element.element_id)}`, payload);
     element.dirty = false;
   } catch (err) {
     status.value =
@@ -225,6 +321,11 @@ const saveSiteElement = async (element) => {
 onMounted(() => {
   fetchItems();
   fetchSiteElements();
+  startSiteElementsPolling();
+});
+
+onBeforeUnmount(() => {
+  stopSiteElementsPolling();
 });
 
 </script>

@@ -1,14 +1,45 @@
 <!DOCTYPE html>
-<html>
+<html lang="sk">
 <head>
-    <title>SaaS Platform Widget</title>
-    <style>body { background: #000; color: white; padding: 50px; }</style>
+    <meta charset="UTF-8">
+    <title>Testovacia stránka s widgetom</title>
+    <style>
+        body { font-family: sans-serif; padding: 40px; background: #f0f0f0; }
+        .hero { background: white; padding: 20px; border-radius: 10px; }
+    </style>
 </head>
 <body>
-    <h1>Náš Cenník (Widget)</h1>
-    
-    <div id="saas-widget" data-client="your-client-id"></div>
 
-    <script src="/widget.js" data-backend-url="/api"></script>
+    <div class="hero">
+        <h1>Vitajte v Arben Gyme</h1>
+        <p>Najlepšie tréningy v meste Nitra.</p>
+    </div>
+
+    <div
+      id="niche-cms-widget"
+      data-client-id="1f5d576a-1733-4b4f-8965-df8f27d54327"
+      style="min-height: 260px; margin-top: 1.5rem;"
+    ></div>
+
+    <script>
+      (function () {
+        const loaderId = 'niche-cms-widget-loader';
+        if (document.getElementById(loaderId)) {
+          return;
+        }
+        const script = document.createElement('script');
+        script.id = loaderId;
+        script.async = true;
+        script.src = 'http://localhost:3000/widget.js';
+        script.onload = () => {
+          const host = document.querySelector('#niche-cms-widget');
+          if (host) {
+            host.dataset.clientId = host.dataset.clientId || 'demo-client';
+          }
+        };
+        document.head.appendChild(script);
+      })();
+    </script>
+
 </body>
 </html>
